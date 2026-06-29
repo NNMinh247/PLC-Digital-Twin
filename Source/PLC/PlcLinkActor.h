@@ -1,0 +1,86 @@
+// PlcLinkActor.h
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "IWebSocket.h"
+#include "PlcLinkActor.generated.h"
+
+class FJsonObject;
+
+// Y (đèn / output) đổi trạng thái
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLightChanged, int32, Index, bool, bIsOn);
+// X (công tắc / input) đổi trạng thái
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInputChanged, int32, Index, bool, bIsOn);
+// D (thanh ghi) đổi giá trị
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnRegisterChanged, const FString&, Name, int32, Value);
+
+UCLASS()
+class PLC_API APlcLinkActor : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    APlcLinkActor();
+
+protected:
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+public:
+    // Gửi lệnh đảo trạng thái đèn xuống PLC: gửi JSON {"toggle":n}
+    UFUNCTION(BlueprintCallable, Category = "PLC")
+    void ToggleLight(int32 Index);
+
+    // Số kênh X/Y theo dõi (mặc định 8 -> X0..X7, Y0..Y7)
+    UPROPERTY(EditAnywhere, Category = "PLC")
+    int32 NumChannels = 8;
+
+    // Địa chỉ Bridge. Dùng IP máy chạy Bridge nếu khác máy.
+    UPROPERTY(EditAnywhere, Category = "PLC")
+    FString ServerUrl = TEXT("ws://127.0.0.1:8080");
+
+    // ===== Sự kiện cho UI / Blueprint =====
+    UPROPERTY(BlueprintAssignable, Category = "PLC")
+    FOnLightChanged OnLightChanged;       // Y / đèn
+
+    UPROPERTY(BlueprintAssignable, Category = "PLC")
+    FOnInputChanged OnInputChanged;       // X / công tắc
+
+    UPROPERTY(BlueprintAssignable, Category = "PLC")
+    FOnRegisterChanged OnRegisterChanged; // D / thanh ghi
+
+    // ===== Truy vấn trạng thái hiện tại =====
+    UFUNCTION(BlueprintCallable, Category = "PLC")
+    bool GetInputState(int32 Index) const;        // X
+
+    UFUNCTION(BlueprintCallable, Category = "PLC")
+    bool GetOutputState(int32 Index) const;        // Y
+
+    UFUNCTION(BlueprintCallable, Category = "PLC")
+    int32 GetRegister(const FString& Name) const;  // D
+
+    // Tạo chuỗi trạng thái công tắc: "X1: ON   X2: OFF   ..."
+    UFUNCTION(BlueprintCallable, Category = "PLC")
+    FString BuildInputStatusString() const;
+
+private:
+    void HandleMessage(const FString& Message);
+    void ApplyLight(int32 Index, bool bOn);
+    void BindToggleKeys();
+
+    // Root component (để actor đầy đủ + đặt được trong level)
+    UPROPERTY(VisibleAnywhere, Category = "PLC")
+    class USceneComponent* SceneRoot;
+
+    TSharedPtr<IWebSocket> WebSocket;
+
+    // Trạng thái gần nhất (để chỉ bắn event khi đổi)
+    TArray<bool> LastX;            // công tắc
+    TArray<bool> LastY;            // đèn / output
+    TMap<FString, int32> LastD;    // thanh ghi
+
+    // Bảng tra: index 0..N-1 -> con trỏ tới actor đèn trong level
+    UPROPERTY()
+    TMap<int32, class APlcLight*> LightMap;
+};

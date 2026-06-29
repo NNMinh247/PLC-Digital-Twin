@@ -1,0 +1,39 @@
+// HmiCaptureActor.cpp
+#include "HmiCaptureActor.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Engine/TextureRenderTarget2D.h"
+
+AHmiCaptureActor::AHmiCaptureActor()
+{
+	PrimaryActorTick.bCanEverTick = false;
+
+	Capture = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("Capture"));
+	RootComponent = Capture;
+	Capture->bCaptureEveryFrame = true;
+	Capture->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+}
+
+void AHmiCaptureActor::BeginPlay()
+{
+	Super::BeginPlay();
+
+	int32 W = RTWidth;
+	int32 H = RTHeight;
+	if (W <= 0 || H <= 0)
+	{
+		if (View == EHmiView::Board16x9) { W = 1280; H = 720; }
+		else { W = 1280; H = 240; } // ~16:3 (dải đèn dài, dẹt)
+	}
+
+	RenderTarget = NewObject<UTextureRenderTarget2D>(this, TEXT("HmiRenderTarget"));
+	RenderTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
+	RenderTarget->ClearColor = FLinearColor::Black;
+	RenderTarget->bAutoGenerateMips = false;
+	RenderTarget->InitAutoFormat(W, H);
+	RenderTarget->UpdateResourceImmediate(true);
+
+	if (Capture)
+	{
+		Capture->TextureTarget = RenderTarget;
+	}
+}
