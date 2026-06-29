@@ -13,6 +13,8 @@
 #include "Engine/World.h"
 #include "Components/PrimitiveComponent.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Blueprint/UserWidget.h"
+#include "TimerManager.h"
 
 AWiringPlayerController::AWiringPlayerController()
 {
@@ -32,6 +34,10 @@ AWiringPlayerController::AWiringPlayerController()
 	static ConstructorHelpers::FObjectFinder<UInputAction> IA(
 		TEXT("/Game/Inputs/IA_Grab.IA_Grab"));
 	if (IA.Succeeded()) { GrabAction = IA.Object; }
+
+	// HUD: nạp WBP_HMI nếu đã tạo (đặt ở /Game/UI/WBP_HMI). Chưa có thì bỏ qua, không lỗi.
+	static ConstructorHelpers::FClassFinder<UUserWidget> HmiBP(TEXT("/Game/UI/WBP_HMI"));
+	if (HmiBP.Succeeded()) { HmiWidgetClass = HmiBP.Class; }
 }
 
 void AWiringPlayerController::BeginPlay()
@@ -55,6 +61,10 @@ void AWiringPlayerController::BeginPlay()
 	Mode.SetHideCursorDuringCapture(false);
 	SetInputMode(Mode);
 	bShowMouseCursor = true;
+
+	// Tạo HUD sau 1 nhịp ngắn để AHmiCaptureActor kịp tạo render target.
+	FTimerHandle HudTimer;
+	GetWorldTimerManager().SetTimer(HudTimer, this, &AWiringPlayerController::CreateHud, 0.2f, false);
 }
 
 void AWiringPlayerController::SetupInputComponent()
@@ -227,4 +237,17 @@ void AWiringPlayerController::OnGrabReleased()
 
 	bIsHolding = false;
 	HeldWire = nullptr;
+}
+
+void AWiringPlayerController::CreateHud()
+{
+	if (HmiWidget || !HmiWidgetClass)
+	{
+		return;
+	}
+	HmiWidget = CreateWidget<UUserWidget>(this, HmiWidgetClass);
+	if (HmiWidget)
+	{
+		HmiWidget->AddToViewport();
+	}
 }

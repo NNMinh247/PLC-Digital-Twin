@@ -54,6 +54,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wiring")
 	TSubclassOf<AWire> WireClass;
 
+	// Widget giao diện 4 ô (WBP_HMI). Mặc định nạp /Game/UI/WBP_HMI nếu có.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HMI")
+	TSubclassOf<UUserWidget> HmiWidgetClass;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -77,4 +81,10 @@ protected:
 	EWireEnd HeldEnd;
 
 	bool bIsHolding = false;
+
+	// Tạo + add HUD vào viewport (gọi sau BeginPlay 1 nhịp để các capture actor kịp khởi tạo).
+	void CreateHud();
+
+	UPROPERTY()
+	UUserWidget* HmiWidget = nullptr;
 };
