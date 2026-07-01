@@ -70,6 +70,8 @@ Nén thành 1 file `.zip` cho người nhận, gồm **3 phần**:
 
 | Thao tác | Kết quả |
 |---|---|
+| **Click** cọc A rồi **click** cọc B (trong ô bàn PLC) | Nối 1 dây A→B (xanh nếu đúng cặp, đỏ nếu sai). Một cọc cắm nhiều dây được |
+| **Alt + click** vào dây/cọc | Xoá dây đó |
 | Phím **1–8** | Gửi lệnh `{"toggle":n}` xuống PLC (đảo Đèn 1–8 qua ladder `LD M[n] / OUT Y[n]`) |
 | Công tắc vật lý trên PLC | Cập nhật trạng thái X1–X8 lên HMI |
 
@@ -94,7 +96,7 @@ Nén thành 1 file `.zip` cho người nhận, gồm **3 phần**:
 ## F. Lưu ý quan trọng
 
 - **Địa chỉ X/Y của Mitsubishi là BÁT PHÂN** (X0–X7 rồi X10–X17). 8 kênh đầu (X0–X7) không vướng; nếu mở rộng >8 kênh mới phải để ý nhảy X10.
-- **HMI là màn hình GIÁM SÁT**: 2 ô trái là ảnh SceneCapture (không tương tác). Khi HUD phủ full màn, thao tác kéo dây bằng chuột sẽ bị che — đây là 2 chế độ khác nhau.
+- **HMI 4 ô**: ô trên‑trái = camera đèn (thuần hiển thị); ô **dưới‑trái = bàn PLC tương tác được** — click‑click để nối dây (một cọc nhiều dây), **Alt+click = xoá dây**, phím **1–8** đảo đèn. 2 ô phải là log trạng thái/kết quả.
 - Muốn đổi **IP bridge, số kênh, hay nhãn log** → phải **build lại** trên máy có Unreal 5.6, rồi package lại. Bản package không chỉnh được các thứ này.
 
 ---

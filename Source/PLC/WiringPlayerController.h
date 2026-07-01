@@ -10,6 +10,7 @@
 class UInputMappingContext;
 class UInputAction;
 class UUserWidget;
+class UHmiWidget;
 class AWire;
 class ATerminal;
 enum class EWireEnd : uint8;
@@ -17,16 +18,18 @@ enum class EWireEnd : uint8;
 /**
  * Điều khiển thao tác đấu dây bằng chuột (Enhanced Input).
  *
- * Luồng:
- *  - IA_Grab Started   -> OnGrabStarted: trace dưới chuột (kênh WiringInteract).
- *        + Nếu trúng grab head của một AWire  -> nhấc đầu dây đó ra để kéo.
- *        + Nếu trúng một ATerminal trống      -> spawn dây mới, ghim đầu A vào cọc, kéo đầu B.
- *  - PlayerTick        -> đầu dây đang cầm bám theo con trỏ (ưu tiên dính vào cọc đang hover).
- *  - IA_Grab Completed -> OnGrabReleased: thả trúng cọc hợp lệ thì gắn và CheckConnection;
- *        thả vào chỗ trống mà dây chưa nối đầu nào thì hủy dây.
+ * Cơ chế nối dây kiểu "click-click" (không kéo-thả):
+ *  - Click 1 (IA_Grab) trúng một cọc  -> spawn dây mới, ghim đầu A vào cọc, đầu B bám con trỏ.
+ *  - PlayerTick                        -> đầu B bám theo con trỏ (ưu tiên dính vào cọc đang hover).
+ *  - Click 2:
+ *        + trúng một cọc KHÁC cọc bắt đầu -> nối đầu B vào đó + CheckConnection (dây giữ nguyên).
+ *        + trúng chỗ trống / chính cọc bắt đầu -> huỷ dây đang đặt.
  *
- * Cần đối chiếu với hành vi mong muốn: cơ chế grab head hai đầu, spawn dây khi bấm cọc trống,
- * quy tắc hủy dây khi thả hụt. Điều chỉnh trong các hàm OnGrabStarted, OnGrabReleased, PlayerTick.
+ * Một cọc có thể cắm NHIỀU dây (vd A->B và A->C dùng chung điểm A) — không giới hạn occupied.
+ * Click được chiếu ngược qua camera ô board (Cách A) nếu con trỏ nằm trong ô HMI; nếu không thì
+ * dùng deproject từ viewport chính (chạy được cả khi chưa có HUD, vd test trong editor).
+ *
+ * Alt + click: xoá dây dưới con trỏ (trúng đầu dây, hoặc trúng cọc thì xoá 1 dây nối vào cọc đó).
  */
 UCLASS()
 class PLC_API AWiringPlayerController : public APlayerController
@@ -63,28 +66,36 @@ protected:
 	virtual void SetupInputComponent() override;
 	virtual void PlayerTick(float DeltaTime) override;
 
-	void OnGrabStarted();
-	void OnGrabReleased();
+	// Một cú click chuột (IA_Grab Started). Xử lý cả bắt đầu lẫn hoàn tất dây (và Alt = xoá).
+	void OnClick();
 
-	// Trace 1 tia từ chuột theo kênh cho trước, có thể bỏ qua 1 actor.
+	// Alt + click: xoá dây dưới con trỏ.
+	void DeleteWireUnderCursor();
+
+	// Tìm 1 dây đang nối vào cọc T (dùng khi Alt+click trúng cọc thay vì trúng đầu dây). Null nếu không có.
+	AWire* FindWireOnTerminal(const ATerminal* T) const;
+
+	// Tia dưới con trỏ: ưu tiên ô board (chiếu ngược qua camera) -> deproject viewport chính.
+	bool GetCursorRay(FVector& OutOrigin, FVector& OutDir) const;
+
+	// Trace theo 1 tia cho trước.
+	bool TraceRay(const FVector& Origin, const FVector& Dir, ECollisionChannel Channel, bool bTraceComplex, AActor* IgnoreActor, FHitResult& OutHit) const;
+
+	// Trace 1 tia từ con trỏ theo kênh cho trước, có thể bỏ qua 1 actor.
 	bool TraceCursor(ECollisionChannel Channel, bool bTraceComplex, AActor* IgnoreActor, FHitResult& OutHit) const;
 
-	// Điểm thế giới cho đầu dây đang kéo: ưu tiên dính cọc -> world geometry -> deproject.
+	// Điểm thế giới cho đầu dây đang đặt: ưu tiên dính cọc -> world geometry -> theo tia.
 	bool GetDragWorldPoint(FVector& OutPoint, ATerminal*& OutHoverTerminal) const;
 
-	static EWireEnd OtherEnd(EWireEnd End);
-
+	// Dây đang đặt (đã ghim đầu A, đang chờ click 2 để nối đầu B). Null nếu không đặt.
 	UPROPERTY()
-	AWire* HeldWire = nullptr;
+	AWire* PendingWire = nullptr;
 
-	// Đầu dây đang cầm. Khởi tạo trong constructor.
-	EWireEnd HeldEnd;
-
-	bool bIsHolding = false;
+	bool bPlacing = false;
 
 	// Tạo + add HUD vào viewport (gọi sau BeginPlay 1 nhịp để các capture actor kịp khởi tạo).
 	void CreateHud();
 
 	UPROPERTY()
-	UUserWidget* HmiWidget = nullptr;
+	UHmiWidget* Hmi = nullptr;
 };

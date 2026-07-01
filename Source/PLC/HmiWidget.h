@@ -1,20 +1,33 @@
 // HmiWidget.h
 // Lớp nền C++ cho widget giao diện 4 ô. WBP_HMI kế thừa class này.
+// TOÀN BỘ LOGIC Ở C++: trong UMG chỉ cần vẽ layout + đặt ĐÚNG TÊN các widget dưới đây
+// (không cần kéo node nào trong Graph).
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Styling/SlateColor.h"
 #include "HmiWidget.generated.h"
 
 class UTextureRenderTarget2D;
 class APlcLinkActor;
+class AHmiCaptureActor;
+class UImage;
+class UTextBlock;
+class UScrollBox;
 
 /**
- * Lớp nền cho HUD thực hành PLC (4 ô).
+ * HUD thực hành PLC (4 ô) — logic viết hoàn toàn bằng C++.
  *
- * C++ lo: tìm render target 2 camera, lắng nghe sự kiện PLC, định dạng chuỗi log/status.
- * WBP lo: bố cục 4 ô + cài 4 BlueprintImplementableEvent dưới đây (append ScrollBox / set Text /
- * set brush Image từ BoardRT & LightsRT).
+ * WBP_HMI chỉ cần chứa các widget SAU, đặt tên CHÍNH XÁC (C++ tự tìm qua BindWidget):
+ *   - Image      "LightsView"  : ô trên-trái  (camera đèn, thuần hiển thị)
+ *   - Image      "BoardView"   : ô dưới-trái  (bàn PLC tương tác) — Visibility = Hit Test Invisible
+ *   - TextBlock  "StatusText"  : ô trên-phải  (dòng trạng thái X)
+ *   - ScrollBox  "ActionLog"   : ô trên-phải  (log hành động)
+ *   - ScrollBox  "ResultLog"   : ô dưới-phải  (log kết quả)
+ *
+ * Dùng BindWidgetOptional: thiếu widget nào thì widget đó bị bỏ qua (kèm cảnh báo log),
+ * WBP vẫn compile được — tiện dựng dần trong UMG.
  */
 UCLASS()
 class PLC_API UHmiWidget : public UUserWidget
@@ -22,36 +35,51 @@ class PLC_API UHmiWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	// 2 ô trái: WBP bind brush Image vào 2 render target này (trong OnRenderTargetsReady).
-	UPROPERTY(BlueprintReadOnly, Category = "HMI")
-	UTextureRenderTarget2D* BoardRT = nullptr;   // ô trái-trên (16:9)
+	// ===== Chỉnh nhanh trong WBP > Class Defaults (Details), không cần sửa code =====
 
-	UPROPERTY(BlueprintReadOnly, Category = "HMI")
-	UTextureRenderTarget2D* LightsRT = nullptr;  // ô trái-dưới (16:3)
+	// Màu chữ cho các dòng log tạo lúc runtime.
+	UPROPERTY(EditAnywhere, Category = "HMI|Log")
+	FSlateColor LogTextColor = FSlateColor(FLinearColor::White);
+
+	// Cỡ chữ log.
+	UPROPERTY(EditAnywhere, Category = "HMI|Log")
+	float LogFontSize = 18.f;
+
+	// Giới hạn số dòng log (0 = không giới hạn). Vượt thì xoá dòng cũ nhất.
+	UPROPERTY(EditAnywhere, Category = "HMI|Log")
+	int32 MaxLogLines = 200;
+
+	// ===== Ô board tương tác (click-to-wire trong ô HMI) =====
+
+	// Con trỏ có đang nằm trong ô board không.
+	bool IsCursorOverBoard() const;
+
+	// Tia thế giới đi qua con trỏ NẾU con trỏ đang nằm trong ô board. Trả false nếu không.
+	// AWiringPlayerController dùng hàm này để trace cọc/dây khi click trong ô board.
+	bool GetBoardRayUnderCursor(FVector& OutOrigin, FVector& OutDir) const;
 
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 
-	// ===== WBP cài đặt các event này =====
+	// ===== Widget do UMG cung cấp (bind theo tên) =====
 
-	// Render target đã sẵn sàng -> WBP set brush cho 2 Image bên trái.
-	UFUNCTION(BlueprintImplementableEvent, Category = "HMI")
-	void OnRenderTargetsReady();
+	UPROPERTY(meta = (BindWidgetOptional))
+	UImage* LightsView = nullptr;   // ô trên-trái: camera đèn
 
-	// Ô phải-trên: cập nhật dòng trạng thái công tắc "X1: ON  X2: OFF ...".
-	UFUNCTION(BlueprintImplementableEvent, Category = "HMI")
-	void OnStatusUpdated(const FString& StatusText);
+	UPROPERTY(meta = (BindWidgetOptional))
+	UImage* BoardView = nullptr;    // ô dưới-trái: bàn PLC tương tác (Hit Test Invisible)
 
-	// Ô phải-trên: thêm 1 dòng vào scrollbox hành động ("Bật X1", "Tắt X2"...).
-	UFUNCTION(BlueprintImplementableEvent, Category = "HMI")
-	void OnActionLog(const FString& Line);
+	UPROPERTY(meta = (BindWidgetOptional))
+	UTextBlock* StatusText = nullptr; // ô trên-phải: dòng trạng thái
 
-	// Ô phải-dưới: thêm 1 dòng vào scrollbox kết quả ("Đèn 1 BẬT", "Gán D0 = 100"...).
-	UFUNCTION(BlueprintImplementableEvent, Category = "HMI")
-	void OnResultLog(const FString& Line);
+	UPROPERTY(meta = (BindWidgetOptional))
+	UScrollBox* ActionLog = nullptr;  // ô trên-phải: log hành động
 
-	// ===== Xử lý sự kiện từ PLC =====
+	UPROPERTY(meta = (BindWidgetOptional))
+	UScrollBox* ResultLog = nullptr;  // ô dưới-phải: log kết quả
+
+	// ===== Xử lý sự kiện từ PLC (bind vào delegate của APlcLinkActor) =====
 	UFUNCTION()
 	void HandleInputChanged(int32 Index, bool bOn);             // X -> action log + status
 
@@ -64,7 +92,24 @@ protected:
 	UPROPERTY()
 	APlcLinkActor* Link = nullptr;
 
+	// 2 render target lấy từ AHmiCaptureActor (C++ tự gán vào brush của 2 Image bên trái).
+	UPROPERTY()
+	UTextureRenderTarget2D* BoardRT = nullptr;
+
+	UPROPERTY()
+	UTextureRenderTarget2D* LightsRT = nullptr;
+
+	// Capture actor đang chụp bàn PLC (View = Board16x9). Dùng để chiếu ngược click.
+	UPROPERTY()
+	AHmiCaptureActor* BoardCapture = nullptr;
+
 private:
 	void FindCaptureTargets();
+	void ApplyRenderTargets();               // gán 2 render target vào brush 2 Image
 	void RefreshStatus();
+	void AppendLog(UScrollBox* Box, const FString& Line);
+	void WarnMissingWidgets() const;
+
+	// Toạ độ UV (0..1) của con trỏ trong ô board. Trả false nếu con trỏ ngoài ô.
+	bool GetBoardCursorUV(FVector2D& OutUV) const;
 };

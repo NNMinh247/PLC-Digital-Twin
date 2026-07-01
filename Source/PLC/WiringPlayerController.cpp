@@ -3,6 +3,7 @@
 #include "Wire.h"
 #include "Terminal.h"
 #include "WiringInteraction.h"
+#include "HmiWidget.h"
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -15,6 +16,8 @@
 #include "UObject/ConstructorHelpers.h"
 #include "Blueprint/UserWidget.h"
 #include "TimerManager.h"
+#include "EngineUtils.h"           // TActorIterator (FindWireOnTerminal)
+#include "InputCoreTypes.h"        // EKeys (Alt)
 
 AWiringPlayerController::AWiringPlayerController()
 {
@@ -23,7 +26,6 @@ AWiringPlayerController::AWiringPlayerController()
 	bEnableMouseOverEvents = true;
 	DefaultMouseCursor = EMouseCursor::Crosshairs;
 
-	HeldEnd = EWireEnd::B;
 	WireClass = AWire::StaticClass();
 
 	// Nạp sẵn input asset theo đường dẫn (thuần C++, không cần Blueprint).
@@ -75,8 +77,8 @@ void AWiringPlayerController::SetupInputComponent()
 	{
 		if (GrabAction)
 		{
-			EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &AWiringPlayerController::OnGrabStarted);
-			EIC->BindAction(GrabAction, ETriggerEvent::Completed, this, &AWiringPlayerController::OnGrabReleased);
+			// Click-click: chỉ cần sự kiện nhấn (Started) cho cả bắt đầu và hoàn tất dây.
+			EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &AWiringPlayerController::OnClick);
 		}
 	}
 }
@@ -85,29 +87,38 @@ void AWiringPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
-	if (bIsHolding && HeldWire)
+	if (bPlacing && PendingWire)
 	{
 		FVector Point;
 		ATerminal* Hover = nullptr;
 		if (GetDragWorldPoint(Point, Hover))
 		{
-			HeldWire->SetFreeEndWorldLocation(HeldEnd, Point);
+			PendingWire->SetFreeEndWorldLocation(EWireEnd::B, Point);
 		}
 	}
 }
 
-EWireEnd AWiringPlayerController::OtherEnd(EWireEnd End)
+bool AWiringPlayerController::GetCursorRay(FVector& OutOrigin, FVector& OutDir) const
 {
-	return (End == EWireEnd::A) ? EWireEnd::B : EWireEnd::A;
+	// 1) Con trỏ trong ô board -> chiếu ngược qua camera capture (Cách A).
+	if (Hmi && Hmi->GetBoardRayUnderCursor(OutOrigin, OutDir))
+	{
+		return true;
+	}
+
+	// 2) Fallback: deproject từ viewport chính (khi chưa có HUD, hoặc con trỏ ngoài ô board).
+	FVector Origin, Dir;
+	if (DeprojectMousePositionToWorld(Origin, Dir))
+	{
+		OutOrigin = Origin;
+		OutDir = Dir;
+		return true;
+	}
+	return false;
 }
 
-bool AWiringPlayerController::TraceCursor(ECollisionChannel Channel, bool bTraceComplex, AActor* IgnoreActor, FHitResult& OutHit) const
+bool AWiringPlayerController::TraceRay(const FVector& Origin, const FVector& Dir, ECollisionChannel Channel, bool bTraceComplex, AActor* IgnoreActor, FHitResult& OutHit) const
 {
-	FVector Origin, Dir;
-	if (!DeprojectMousePositionToWorld(Origin, Dir))
-	{
-		return false;
-	}
 	const FVector End = Origin + Dir * TraceDistance;
 
 	FCollisionQueryParams Params(FName(TEXT("WiringCursor")), bTraceComplex);
@@ -118,13 +129,23 @@ bool AWiringPlayerController::TraceCursor(ECollisionChannel Channel, bool bTrace
 	return GetWorld()->LineTraceSingleByChannel(OutHit, Origin, End, Channel, Params);
 }
 
+bool AWiringPlayerController::TraceCursor(ECollisionChannel Channel, bool bTraceComplex, AActor* IgnoreActor, FHitResult& OutHit) const
+{
+	FVector Origin, Dir;
+	if (!GetCursorRay(Origin, Dir))
+	{
+		return false;
+	}
+	return TraceRay(Origin, Dir, Channel, bTraceComplex, IgnoreActor, OutHit);
+}
+
 bool AWiringPlayerController::GetDragWorldPoint(FVector& OutPoint, ATerminal*& OutHoverTerminal) const
 {
 	OutHoverTerminal = nullptr;
 
 	// 1) Hover trúng cọc -> dính vào điểm snap của cọc (preview).
 	FHitResult Hit;
-	if (TraceCursor(WIRING_TRACE_CHANNEL, false, HeldWire, Hit))
+	if (TraceCursor(WIRING_TRACE_CHANNEL, false, PendingWire, Hit))
 	{
 		if (ATerminal* T = Cast<ATerminal>(Hit.GetActor()))
 		{
@@ -135,15 +156,15 @@ bool AWiringPlayerController::GetDragWorldPoint(FVector& OutPoint, ATerminal*& O
 	}
 
 	// 2) Trúng hình học thế giới -> bám mặt phẳng đó.
-	if (TraceCursor(ECC_Visibility, true, HeldWire, Hit))
+	if (TraceCursor(ECC_Visibility, true, PendingWire, Hit))
 	{
 		OutPoint = Hit.ImpactPoint;
 		return true;
 	}
 
-	// 3) Không trúng gì -> đặt cách camera một đoạn theo tia chuột.
+	// 3) Không trúng gì -> đặt cách nguồn một đoạn theo tia con trỏ.
 	FVector Origin, Dir;
-	if (DeprojectMousePositionToWorld(Origin, Dir))
+	if (GetCursorRay(Origin, Dir))
 	{
 		OutPoint = Origin + Dir * 200.0f;
 		return true;
@@ -151,34 +172,25 @@ bool AWiringPlayerController::GetDragWorldPoint(FVector& OutPoint, ATerminal*& O
 	return false;
 }
 
-void AWiringPlayerController::OnGrabStarted()
+void AWiringPlayerController::OnClick()
 {
-	FHitResult Hit;
-	if (!TraceCursor(WIRING_TRACE_CHANNEL, false, nullptr, Hit))
+	// Alt + click -> xoá dây (không tạo/nối dây).
+	if (IsInputKeyDown(EKeys::LeftAlt) || IsInputKeyDown(EKeys::RightAlt))
 	{
+		DeleteWireUnderCursor();
 		return;
 	}
 
-	// a) Trúng grab head của một dây -> nhấc đầu đó ra để kéo.
-	if (AWire* W = Cast<AWire>(Hit.GetActor()))
-	{
-		EWireEnd End;
-		if (W->TryGetEndFromComponent(Hit.GetComponent(), End))
-		{
-			HeldWire = W;
-			HeldEnd = End;
-			bIsHolding = true;
-			W->DetachEnd(End); // tách khỏi cọc (nếu đang cắm) để kéo tự do
-			return;
-		}
-	}
+	FHitResult Hit;
+	const bool bHit = TraceCursor(WIRING_TRACE_CHANNEL, false, PendingWire, Hit);
+	ATerminal* HitTerm = bHit ? Cast<ATerminal>(Hit.GetActor()) : nullptr;
 
-	// b) Trúng cọc trống -> spawn dây mới, ghim đầu A vào cọc, kéo đầu B.
-	if (ATerminal* T = Cast<ATerminal>(Hit.GetActor()))
+	if (!bPlacing)
 	{
-		if (T->bIsOccupied)
+		// ===== Click 1: bắt đầu dây từ một cọc =====
+		if (!HitTerm)
 		{
-			return;
+			return; // click hụt -> không làm gì
 		}
 
 		UWorld* World = GetWorld();
@@ -188,66 +200,111 @@ void AWiringPlayerController::OnGrabStarted()
 		}
 
 		UClass* ClassToSpawn = WireClass.Get() ? WireClass.Get() : AWire::StaticClass();
-		AWire* NewWire = World->SpawnActor<AWire>(ClassToSpawn, T->GetSnapLocation(), FRotator::ZeroRotator);
-		if (NewWire)
+		AWire* NewWire = World->SpawnActor<AWire>(ClassToSpawn, HitTerm->GetSnapLocation(), FRotator::ZeroRotator);
+		if (!NewWire)
 		{
-			NewWire->AttachEndToTerminal(EWireEnd::A, T);
-			NewWire->SetFreeEndWorldLocation(EWireEnd::B, T->GetSnapLocation());
-			HeldWire = NewWire;
-			HeldEnd = EWireEnd::B;
-			bIsHolding = true;
+			return;
+		}
+
+		NewWire->AttachEndToTerminal(EWireEnd::A, HitTerm);       // ghim đầu A vào cọc vừa click
+		NewWire->SetFreeEndWorldLocation(EWireEnd::B, HitTerm->GetSnapLocation());
+		PendingWire = NewWire;
+		bPlacing = true;
+		return;
+	}
+
+	// ===== Click 2: hoàn tất hoặc huỷ dây đang đặt =====
+	ATerminal* StartTerm = PendingWire ? PendingWire->GetTerminal(EWireEnd::A) : nullptr;
+
+	if (PendingWire && HitTerm && HitTerm != StartTerm)
+	{
+		// Nối đầu B vào cọc khác -> hoàn tất. Cho phép nhiều dây chung 1 cọc (không chặn occupied).
+		PendingWire->AttachEndToTerminal(EWireEnd::B, HitTerm); // gắn + CheckConnection bên trong
+	}
+	else
+	{
+		// Click vào chỗ trống hoặc chính cọc bắt đầu -> huỷ dây đang đặt.
+		if (PendingWire)
+		{
+			PendingWire->Destroy();
+		}
+	}
+
+	PendingWire = nullptr;
+	bPlacing = false;
+}
+
+void AWiringPlayerController::DeleteWireUnderCursor()
+{
+	FVector Origin, Dir;
+	if (!GetCursorRay(Origin, Dir))
+	{
+		return;
+	}
+	const FVector End = Origin + Dir * TraceDistance;
+
+	// Multi-trace để bắt được đầu dây kể cả khi nằm sau cọc (đầu dây ghim tại cọc).
+	TArray<FHitResult> Hits;
+	FCollisionQueryParams Params(FName(TEXT("WiringDelete")), false);
+	if (PendingWire)
+	{
+		Params.AddIgnoredActor(PendingWire); // đừng xoá dây đang đặt dở
+	}
+	GetWorld()->LineTraceMultiByChannel(Hits, Origin, End, WIRING_TRACE_CHANNEL, Params);
+
+	// 1) Ưu tiên: trúng thẳng một dây (grab head).
+	const ATerminal* HitTerm = nullptr;
+	for (const FHitResult& H : Hits)
+	{
+		if (AWire* W = Cast<AWire>(H.GetActor()))
+		{
+			W->Destroy();
+			return;
+		}
+		if (!HitTerm)
+		{
+			HitTerm = Cast<ATerminal>(H.GetActor());
+		}
+	}
+
+	// 2) Không trúng đầu dây nhưng trúng cọc -> xoá 1 dây đang nối vào cọc đó.
+	if (HitTerm)
+	{
+		if (AWire* W = FindWireOnTerminal(HitTerm))
+		{
+			W->Destroy();
 		}
 	}
 }
 
-void AWiringPlayerController::OnGrabReleased()
+AWire* AWiringPlayerController::FindWireOnTerminal(const ATerminal* T) const
 {
-	if (!bIsHolding || !HeldWire)
+	if (!T)
 	{
-		bIsHolding = false;
-		HeldWire = nullptr;
-		return;
+		return nullptr;
 	}
-
-	bool bSnapped = false;
-
-	FHitResult Hit;
-	if (TraceCursor(WIRING_TRACE_CHANNEL, false, HeldWire, Hit))
+	for (TActorIterator<AWire> It(GetWorld()); It; ++It)
 	{
-		if (ATerminal* T = Cast<ATerminal>(Hit.GetActor()))
+		AWire* W = *It;
+		if (W && W != PendingWire &&
+			(W->GetTerminal(EWireEnd::A) == T || W->GetTerminal(EWireEnd::B) == T))
 		{
-			ATerminal* Other = HeldWire->GetTerminal(OtherEnd(HeldEnd));
-			if (!T->bIsOccupied && T != Other)
-			{
-				HeldWire->AttachEndToTerminal(HeldEnd, T); // gắn + CheckConnection bên trong
-				bSnapped = true;
-			}
+			return W;
 		}
 	}
-
-	if (!bSnapped)
-	{
-		// Thả hụt: nếu đầu kia cũng chưa nối -> bỏ dây; nếu đã nối -> để lủng lẳng.
-		ATerminal* Other = HeldWire->GetTerminal(OtherEnd(HeldEnd));
-		if (!Other)
-		{
-			HeldWire->Destroy();
-		}
-	}
-
-	bIsHolding = false;
-	HeldWire = nullptr;
+	return nullptr;
 }
 
 void AWiringPlayerController::CreateHud()
 {
-	if (HmiWidget || !HmiWidgetClass)
+	if (Hmi || !HmiWidgetClass)
 	{
 		return;
 	}
-	HmiWidget = CreateWidget<UUserWidget>(this, HmiWidgetClass);
-	if (HmiWidget)
+	UUserWidget* Widget = CreateWidget<UUserWidget>(this, HmiWidgetClass);
+	Hmi = Cast<UHmiWidget>(Widget);   // cần cho click-chiếu-ngược trong ô board
+	if (Widget)
 	{
-		HmiWidget->AddToViewport();
+		Widget->AddToViewport();
 	}
 }

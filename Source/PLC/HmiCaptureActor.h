@@ -47,6 +47,11 @@ public:
 	FORCEINLINE EHmiView GetView() const { return View; }
 	FORCEINLINE UTextureRenderTarget2D* GetRenderTarget() const { return RenderTarget; }
 
+	// Chiếu một điểm UV (0..1, gốc trên-trái) trên ảnh render target thành một tia
+	// thế giới đi qua camera capture. Dùng để: click trên ô HMI -> tương tác trong scene 3D.
+	// Trả về false nếu chưa có render target / capture.
+	bool DeprojectUVToWorldRay(const FVector2D& UV, FVector& OutOrigin, FVector& OutDir) const;
+
 protected:
 	virtual void BeginPlay() override;
 
