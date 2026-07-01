@@ -23,15 +23,13 @@ AWire::AWire()
 	Cable->bAttachEnd = true;
 	Cable->CableLength = CableLength;
 	Cable->CableWidth = CableWidth;
-	Cable->NumSegments = 8;
 	Cable->NumSides = 6;
 	Cable->EndLocation = FVector(1.0f, 0.0f, 0.0f);
 	Cable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-	// Dây căng thẳng, ổn định: bỏ trọng lực + solver cứng. 2 đầu đã ghim + CableLength = đúng
-	// khoảng cách 2 đầu (đặt trong RefreshCable) -> cable là đoạn thẳng, không nhảy/không võng.
 	Cable->CableGravityScale = 0.0f;
-	Cable->SolverIterations = 16;
+
+	// Cấu hình cứng/mềm theo cờ bSimulateCable (mặc định = cứng như đường thẳng).
+	ApplyCableMode();
 
 	// Grab head 2 đầu: Block kênh WiringInteract để chuột trace trúng.
 	auto MakeHead = [this](const TCHAR* Name) -> USphereComponent*
@@ -73,7 +71,30 @@ void AWire::BeginPlay()
 	{
 		Cable->CableWidth = CableWidth;
 	}
+	ApplyCableMode();
 	RefreshCable();
+}
+
+void AWire::ApplyCableMode()
+{
+	if (!Cable)
+	{
+		return;
+	}
+	Cable->CableGravityScale = 0.0f;
+	if (bSimulateCable)
+	{
+		// MỀM: cable giả lập Verlet nhiều đốt -> hơi đung đưa như trước.
+		Cable->NumSegments = 8;
+		Cable->SolverIterations = 16;
+	}
+	else
+	{
+		// CỨNG: 1 đốt = đường thẳng nối thẳng 2 đầu (đều đã ghim) -> không hạt tự do,
+		// không giả lập/không rung. Vẫn bám chuột mượt vì 2 đầu luôn được ghim theo vị trí.
+		Cable->NumSegments = 1;
+		Cable->SolverIterations = 1;
+	}
 }
 
 void AWire::Destroyed()

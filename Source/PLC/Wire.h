@@ -50,6 +50,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wiring")
 	float CableWidth = 4.0f;   // dày gấp đôi (trước = 2.0)
 
+	// CỨNG hay MỀM.
+	//   false (mặc định) = dây CỨNG như đường thẳng, KHÔNG giả lập vật lý, không rung.
+	//   true             = bật lại hiệu ứng cable mềm (giả lập Verlet, hơi đung đưa) như trước.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wiring")
+	bool bSimulateCable = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wiring")
 	float CableLength = 1.0f;
 
@@ -94,6 +100,9 @@ protected:
 
 	// Cập nhật hình học cable + grab head theo trạng thái 2 đầu
 	void RefreshCable();
+
+	// Áp dụng chế độ cứng/mềm cho cable theo bSimulateCable (gọi ở constructor + BeginPlay).
+	void ApplyCableMode();
 
 	// Đổi material theo trạng thái nối (xanh = đã nối đủ 2 đầu, đỏ = chưa).
 	void ApplyColor(bool bConnected);
