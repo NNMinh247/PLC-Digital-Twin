@@ -8,6 +8,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "GameFramework/PlayerController.h"
 #include "Components/SceneComponent.h"
+#include "Engine/Engine.h"                     // GEngine->AddOnScreenDebugMessage
 
 APlcLinkActor::APlcLinkActor()
 {
@@ -198,9 +199,78 @@ void APlcLinkActor::BindToggleKeys()
     for (int32 i = 0; i < 8; ++i)
     {
         FInputKeyBinding Binding(FInputChord(Keys[i], false, false, false, false), IE_Pressed);
-        Binding.KeyDelegate.GetDelegateForManualSet().BindLambda([this, i]() { ToggleLight(i); });
+        Binding.KeyDelegate.GetDelegateForManualSet().BindLambda([this, i]() { HandleNumberKey(i); });
         InputComponent->KeyBindings.Add(Binding);
     }
+
+    // Phím S: bật/tắt chế độ giả lập.
+    {
+        FInputKeyBinding SimBind(FInputChord(EKeys::S, false, false, false, false), IE_Pressed);
+        SimBind.KeyDelegate.GetDelegateForManualSet().BindLambda([this]() { ToggleSimulation(); });
+        InputComponent->KeyBindings.Add(SimBind);
+    }
+}
+
+// Phím 1..8: khi giả lập -> đảo đèn tại chỗ; khi thường -> gửi toggle xuống PLC như cũ.
+void APlcLinkActor::HandleNumberKey(int32 Index)
+{
+    if (bSimulationMode)
+    {
+        SimToggleLight(Index);
+    }
+    else
+    {
+        ToggleLight(Index);
+    }
+}
+
+// Bật/tắt chế độ giả lập + báo trên màn hình.
+void APlcLinkActor::ToggleSimulation()
+{
+    bSimulationMode = !bSimulationMode;
+    UE_LOG(LogTemp, Warning, TEXT("[PLC] Che do gia lap: %s"), bSimulationMode ? TEXT("BAT") : TEXT("TAT"));
+
+    if (bSimulationMode)
+    {
+        // Chỉ báo cố định trên màn hình trong suốt thời gian giả lập.
+        ShowScreenLog(TEXT("[GIA LAP] DANG BAT  -  phim 1..8: bat/tat den   |   S: tat gia lap"),
+                      FColor::Green, 100, 1.0e9f);
+    }
+    else
+    {
+        if (GEngine)
+        {
+            GEngine->RemoveOnScreenDebugMessage(100);
+        }
+        ShowScreenLog(TEXT("[GIA LAP] DA TAT"), FColor::Yellow, 100, 3.0f);
+    }
+}
+
+// Đảo trạng thái đèn ngay trong Unreal (không gửi xuống PLC).
+void APlcLinkActor::SimToggleLight(int32 Index)
+{
+    if (!LastY.IsValidIndex(Index))
+    {
+        return;
+    }
+
+    const bool bOn = !LastY[Index];
+    LastY[Index] = bOn;
+    ApplyLight(Index, bOn);              // đổi hình đèn trong level
+    OnLightChanged.Broadcast(Index, bOn); // để HMI/log nghe được (nếu có)
+
+    ShowScreenLog(
+        FString::Printf(TEXT("[GIA LAP] Den %d (H%d): %s"), Index + 1, Index + 1, bOn ? TEXT("BAT") : TEXT("TAT")),
+        bOn ? FColor::Red : FColor::Silver, 200 + Index, 3.0f);
+}
+
+void APlcLinkActor::ShowScreenLog(const FString& Text, const FColor& Color, int32 Key, float Duration)
+{
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(Key, Duration, Color, Text);
+    }
+    UE_LOG(LogTemp, Log, TEXT("%s"), *Text);
 }
 
 void APlcLinkActor::EndPlay(const EEndPlayReason::Type EndPlayReason)

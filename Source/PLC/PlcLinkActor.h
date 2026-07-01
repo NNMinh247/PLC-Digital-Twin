@@ -40,6 +40,11 @@ public:
     UPROPERTY(EditAnywhere, Category = "PLC")
     FString ServerUrl = TEXT("ws://127.0.0.1:8080");
 
+    // Chế độ giả lập: bật bằng phím S. Khi bật, phím 1..8 tự bật/tắt đèn ngay trong Unreal
+    // (không gửi xuống PLC) để test khi chưa cắm PLC. Có thể đặt sẵn = true trong Details.
+    UPROPERTY(EditAnywhere, Category = "PLC|Simulation")
+    bool bSimulationMode = false;
+
     // ===== Sự kiện cho UI / Blueprint =====
     UPROPERTY(BlueprintAssignable, Category = "PLC")
     FOnLightChanged OnLightChanged;       // Y / đèn
@@ -68,6 +73,15 @@ private:
     void HandleMessage(const FString& Message);
     void ApplyLight(int32 Index, bool bOn);
     void BindToggleKeys();
+
+    // Phím 1..8: giả lập -> đảo đèn tại chỗ; thường -> gửi toggle xuống PLC.
+    void HandleNumberKey(int32 Index);
+    // Phím S: bật/tắt chế độ giả lập (kèm log trên màn hình).
+    void ToggleSimulation();
+    // Đảo trạng thái đèn ngay trong Unreal (dùng cho giả lập).
+    void SimToggleLight(int32 Index);
+    // Ghi 1 dòng log lên màn hình (AddOnScreenDebugMessage).
+    void ShowScreenLog(const FString& Text, const FColor& Color, int32 Key, float Duration = 3.0f);
 
     // Root component (để actor đầy đủ + đặt được trong level)
     UPROPERTY(VisibleAnywhere, Category = "PLC")
