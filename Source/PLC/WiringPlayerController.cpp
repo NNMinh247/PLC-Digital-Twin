@@ -13,19 +13,24 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"          // GEngine->AddOnScreenDebugMessage (debug)
+#include "Engine/GameViewportClient.h" // SetSoftwareCursorWidget (con trỏ mềm)
+#include "Engine/Texture2D.h"       // UTexture2D (icon con trỏ)
 #include "Components/PrimitiveComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Blueprint/UserWidget.h"
 #include "TimerManager.h"
 #include "EngineUtils.h"           // TActorIterator (FindWireOnTerminal)
 #include "InputCoreTypes.h"        // EKeys (Alt)
+#include "Widgets/Images/SImage.h" // SImage (widget vẽ con trỏ)
+#include "Styling/SlateBrush.h"    // FSlateBrush
 
 AWiringPlayerController::AWiringPlayerController()
 {
 	bShowMouseCursor = true;
 	bEnableClickEvents = true;
 	bEnableMouseOverEvents = true;
-	DefaultMouseCursor = EMouseCursor::Crosshairs;
+	// Dùng con trỏ mềm (widget) do app tự vẽ -> đăng ký cho kiểu Default (xem SetupSoftwareCursor).
+	DefaultMouseCursor = EMouseCursor::Default;
 
 	WireClass = AWire::StaticClass();
 	PlacingEnd = EWireEnd::B;
@@ -42,6 +47,10 @@ AWiringPlayerController::AWiringPlayerController()
 	// HUD: nạp WBP_HMI nếu đã tạo (đặt ở /Game/UI/WBP_HMI). Chưa có thì bỏ qua, không lỗi.
 	static ConstructorHelpers::FClassFinder<UUserWidget> HmiBP(TEXT("/Game/UI/WBP_HMI"));
 	if (HmiBP.Succeeded()) { HmiWidgetClass = HmiBP.Class; }
+
+	// Icon con trỏ mềm: nạp texture /Game/UI/T_Cursor (import từ Art/T_Cursor.png). Chưa có thì bỏ qua.
+	static ConstructorHelpers::FObjectFinder<UTexture2D> CursorTex(TEXT("/Game/UI/T_Cursor.T_Cursor"));
+	if (CursorTex.Succeeded()) { CursorTexture = CursorTex.Object; }
 }
 
 void AWiringPlayerController::BeginPlay()
@@ -66,9 +75,54 @@ void AWiringPlayerController::BeginPlay()
 	SetInputMode(Mode);
 	bShowMouseCursor = true;
 
+	// Đăng ký con trỏ mềm do app tự vẽ (không bị viewport / Pixel Streaming "nuốt" con trỏ OS).
+	SetupSoftwareCursor();
+
 	// Tạo HUD NGAY để 4 ô HMI phủ kín màn hình từ frame đầu (không thấy viewport thô).
 	// Render target có thể chưa sẵn ở thời điểm này -> UHmiWidget tự thử lại trong NativeTick.
 	CreateHud();
+}
+
+void AWiringPlayerController::SetupSoftwareCursor()
+{
+	// Dự phòng: nếu chưa gán ở constructor (vd import texture sau khi editor đã mở), nạp lại lúc chạy.
+	if (!CursorTexture)
+	{
+		CursorTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/T_Cursor.T_Cursor"));
+	}
+
+	// Chỉ controller cục bộ mới có viewport để vẽ con trỏ; chưa có texture thì bỏ qua (không lỗi).
+	if (!IsLocalController() || !CursorTexture)
+	{
+		return;
+	}
+
+	UGameViewportClient* VP = GetWorld() ? GetWorld()->GetGameViewport() : nullptr;
+	if (!VP)
+	{
+		return;
+	}
+
+	// Kích thước hiển thị của cả khung con trỏ: theo chiều cao mong muốn, giữ đúng tỉ lệ texture.
+	// Lưu ý: texture đã được bake sao cho ĐẦU NHỌN nằm ở TÂM ảnh, vì Slate căn tâm widget vào
+	// vị trí chuột (SlateUser::DrawCursor: CursorPos += -0.5 * DesiredSize) -> hotspot = đầu nhọn.
+	const float TexW = static_cast<float>(CursorTexture->GetSizeX());
+	const float TexH = static_cast<float>(CursorTexture->GetSizeY());
+	const float Height = FMath::Max(1.0f, SoftwareCursorHeight);
+	const float Width = (TexH > 0.0f) ? Height * TexW / TexH : Height;
+
+	CursorBrush = MakeShared<FSlateBrush>();
+	CursorBrush->SetResourceObject(CursorTexture);
+	CursorBrush->ImageSize = FVector2D(Width, Height);
+	CursorBrush->DrawAs = ESlateBrushDrawType::Image;
+
+	CursorWidget = SNew(SImage).Image(CursorBrush.Get());
+
+	VP->SetUseSoftwareCursorWidgets(true);
+	// Đăng ký cùng một widget cho các kiểu con trỏ hay gặp -> mọi trạng thái hover đều là icon này.
+	VP->SetSoftwareCursorWidget(EMouseCursor::Default, CursorWidget);
+	VP->SetSoftwareCursorWidget(EMouseCursor::Crosshairs, CursorWidget);
+	VP->SetSoftwareCursorWidget(EMouseCursor::Hand, CursorWidget);
 }
 
 void AWiringPlayerController::SetupInputComponent()

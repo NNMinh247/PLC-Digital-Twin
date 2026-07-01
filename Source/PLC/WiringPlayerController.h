@@ -11,10 +11,13 @@ class UInputMappingContext;
 class UInputAction;
 class UUserWidget;
 class UHmiWidget;
+class UTexture2D;
 class AWire;
 class ATerminal;
+class SWidget;
 enum class EWireEnd : uint8;
 struct FHitResult;
+struct FSlateBrush;
 
 /**
  * Điều khiển thao tác đấu dây bằng chuột (Enhanced Input).
@@ -61,6 +64,14 @@ public:
 	// Widget giao diện 4 ô (WBP_HMI). Mặc định nạp /Game/UI/WBP_HMI nếu có.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "HMI")
 	TSubclassOf<UUserWidget> HmiWidgetClass;
+
+	// Icon con trỏ mềm. Mặc định nạp /Game/UI/T_Cursor (bake sao cho đầu nhọn ở TÂM ảnh).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cursor")
+	UTexture2D* CursorTexture = nullptr;
+
+	// Chiều cao hiển thị (px) của cả khung con trỏ; bề rộng suy ra theo tỉ lệ texture.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cursor")
+	float SoftwareCursorHeight = 88.0f;
 
 protected:
 	virtual void BeginPlay() override;
@@ -120,4 +131,11 @@ protected:
 
 	UPROPERTY()
 	UHmiWidget* Hmi = nullptr;
+
+	// Đăng ký con trỏ mềm (widget do app tự vẽ) lên game viewport. An toàn khi chưa có texture.
+	void SetupSoftwareCursor();
+
+	// Giữ brush + widget con trỏ sống suốt vòng đời controller (SImage giữ con trỏ tới brush).
+	TSharedPtr<FSlateBrush> CursorBrush;
+	TSharedPtr<SWidget> CursorWidget;
 };
