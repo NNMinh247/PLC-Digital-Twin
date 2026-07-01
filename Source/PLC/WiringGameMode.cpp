@@ -1,9 +1,11 @@
 // WiringGameMode.cpp
 #include "WiringGameMode.h"
 #include "WiringPlayerController.h"
+#include "FixedViewPawn.h"
 
 AWiringGameMode::AWiringGameMode()
 {
 	PlayerControllerClass = AWiringPlayerController::StaticClass();
-	// Giữ DefaultPawnClass mặc định (DefaultPawn bay) — đủ để nhận input.
+	// Digital twin: camera cố định, không di chuyển (bỏ binding WASD/chuột của DefaultPawn).
+	DefaultPawnClass = AFixedViewPawn::StaticClass();
 }
