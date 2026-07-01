@@ -64,9 +64,9 @@ void AWiringPlayerController::BeginPlay()
 	SetInputMode(Mode);
 	bShowMouseCursor = true;
 
-	// Tạo HUD sau 1 nhịp ngắn để AHmiCaptureActor kịp tạo render target.
-	FTimerHandle HudTimer;
-	GetWorldTimerManager().SetTimer(HudTimer, this, &AWiringPlayerController::CreateHud, 0.2f, false);
+	// Tạo HUD NGAY để 4 ô HMI phủ kín màn hình từ frame đầu (không thấy viewport thô).
+	// Render target có thể chưa sẵn ở thời điểm này -> UHmiWidget tự thử lại trong NativeTick.
+	CreateHud();
 }
 
 void AWiringPlayerController::SetupInputComponent()

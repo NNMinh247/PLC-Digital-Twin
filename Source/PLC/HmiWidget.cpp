@@ -19,8 +19,10 @@ void UHmiWidget::NativeConstruct()
 	WarnMissingWidgets();
 
 	// 1) Lấy 2 render target từ các AHmiCaptureActor trong level rồi gán vào 2 Image bên trái.
+	//    Nếu chưa sẵn (capture actor chưa BeginPlay) -> NativeTick sẽ thử lại.
 	FindCaptureTargets();
 	ApplyRenderTargets();
+	bRenderTargetsApplied = (BoardRT != nullptr && LightsRT != nullptr);
 
 	// 2) Tìm PlcLinkActor và lắng nghe sự kiện.
 	if (UWorld* W = GetWorld())
@@ -50,6 +52,23 @@ void UHmiWidget::NativeDestruct()
 		Link->OnRegisterChanged.RemoveDynamic(this, &UHmiWidget::HandleRegisterChanged);
 	}
 	Super::NativeDestruct();
+}
+
+void UHmiWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	// Thử lại gán render target cho tới khi cả 2 sẵn sàng (hoặc hết thời gian).
+	if (!bRenderTargetsApplied)
+	{
+		RenderTargetRetry -= InDeltaTime;
+		FindCaptureTargets();
+		ApplyRenderTargets();
+		if ((BoardRT && LightsRT) || RenderTargetRetry <= 0.f)
+		{
+			bRenderTargetsApplied = true;
+		}
+	}
 }
 
 void UHmiWidget::FindCaptureTargets()

@@ -41,19 +41,29 @@ PLC FX3U ──serial──► PlcBridge (C#) ──WebSocket {x,y,d}──► A
 1. Content Browser → tạo folder **`/Game/UI`**.
 2. Chuột phải → User Interface → **Widget Blueprint** → parent class = **HmiWidget** → đặt tên đúng **`WBP_HMI`**
    (controller tự nạp theo path `/Game/UI/WBP_HMI`).
-3. Dựng cây widget (ô trái rộng hơn ô phải):
+3. Dựng cây widget. Dùng **Overlay** làm gốc + 1 nền đục phủ full màn để **KHÔNG bao giờ thấy viewport thô**;
+   cột trái rộng hơn cột phải:
 
 ```
-[Horizontal Box]  (Visibility = Self Hit Test Invisible)
- ├─ [Vertical Box]  Slot: Size = Fill, Fill = 2.0   ← CỘT TRÁI (rộng)
- │    ├─ Image      "LightsView"   (trên)  — Visibility = Hit Test Invisible
- │    └─ Image      "BoardView"    (dưới)  — Visibility = Hit Test Invisible   ★ ô tương tác
- └─ [Vertical Box]  Slot: Size = Fill, Fill = 1.0   ← CỘT PHẢI (hẹp)
-      ├─ [Vertical Box]  (ô phải-trên)
-      │    ├─ TextBlock  "StatusText"
-      │    └─ ScrollBox  "ActionLog"     — để mặc định (Visible) cho cuộn được
-      └─ ScrollBox      "ResultLog"      (ô phải-dưới) — Visible
+[Overlay]  (GỐC; Visibility = Self Hit Test Invisible)
+ ├─ [Border] "Backdrop"     — nền đục phủ full màn (Brush Color màu tối), Visibility = Hit Test Invisible
+ └─ [Horizontal Box]        — Visibility = Self Hit Test Invisible
+      ├─ [Vertical Box]  Slot Fill = 2.0   ← CỘT TRÁI (rộng), Visibility = Hit Test Invisible
+      │    ├─ Image  "LightsView"  Slot Fill = 1
+      │    └─ Image  "BoardView"   Slot Fill = 2   ★ ô tương tác (để to hơn cho dễ thao tác)
+      └─ [Border] "RightPanel"  Slot Fill = 1   ← CỘT PHẢI, Brush Color đục, Visibility = Visible
+           └─ [Vertical Box]
+                ├─ [Vertical Box]  Slot Fill = 1   (ô phải-trên)
+                │    ├─ TextBlock  "StatusText"
+                │    └─ ScrollBox  "ActionLog"  Slot Fill = 1
+                └─ ScrollBox      "ResultLog"   Slot Fill = 1   (ô phải-dưới)
 ```
+
+**Tại sao như trên (đọc kỹ 3 dòng này để Play ra đúng 4 ô, không lòi viewport):**
+- **Backdrop** đục + để `Hit Test Invisible` → luôn che viewport nhưng KHÔNG nuốt click.
+- **Cột trái** để `Hit Test Invisible` (cả cột) → click **xuyên xuống game** để nối dây trong `BoardView`.
+  2 Image lấp đầy cột trái nên không lòi viewport ở nửa trái.
+- **Cột phải** là `Border` **đục**, để `Visible` → che viewport nửa phải + cho ScrollBox cuộn được.
 
 ### ⚠️ Bảng widget BẮT BUỘC (đặt đúng TÊN + đúng LOẠI — C++ tự bind theo tên)
 
@@ -110,7 +120,7 @@ Cơ chế chiếu ngược phụ thuộc hướng camera, có thể bị lật g
 ## 6. Build & chạy
 
 1. Regenerate VS project files nếu thêm file C++ mới → build **Development Editor / Win64** (module đã có `UMG`).
-2. GameMode đã là `AWiringGameMode` → `AWiringPlayerController` tự tạo `WBP_HMI` khi Play (sau ~0.2 s).
+2. GameMode đã là `AWiringGameMode` → `AWiringPlayerController` tự tạo `WBP_HMI` **ngay khi Play** (HMI phủ kín màn hình từ frame đầu, không thấy viewport thô). Ảnh 2 camera tự hiện sau 1–2 frame khi render target sẵn sàng (`UHmiWidget` tự thử lại).
 3. Chạy bridge (đã gửi `x/y/d`) → bấm Play.
    - 2 ô trái hiện camera (không cần bridge).
    - Lật công tắc thật → ô phải-trên đổi trạng thái + thêm dòng "Bật X1".

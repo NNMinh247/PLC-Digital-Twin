@@ -61,6 +61,7 @@ public:
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	// ===== Widget do UMG cung cấp (bind theo tên) =====
 
@@ -104,6 +105,11 @@ protected:
 	AHmiCaptureActor* BoardCapture = nullptr;
 
 private:
+	// Đã gán xong render target chưa (để dừng thử lại trong NativeTick).
+	bool bRenderTargetsApplied = false;
+	// Thời gian (giây) còn thử lại gán render target khi mới Play.
+	float RenderTargetRetry = 3.f;
+
 	void FindCaptureTargets();
 	void ApplyRenderTargets();               // gán 2 render target vào brush 2 Image
 	void RefreshStatus();
