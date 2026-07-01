@@ -26,6 +26,11 @@ AWire::AWire()
 	Cable->EndLocation = FVector(1.0f, 0.0f, 0.0f);
 	Cable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	// Ổn định preview: bỏ trọng lực (không rơi/đung đưa như dây thừng) + solver cứng hơn.
+	// -> khi rê chuột, dây bám thẳng theo 2 đầu, không "nhảy". Muốn dây võng thì tăng CableGravityScale.
+	Cable->CableGravityScale = 0.0f;
+	Cable->SolverIterations = 8;
+
 	// Grab head 2 đầu: Block kênh WiringInteract để chuột trace trúng.
 	auto MakeHead = [this](const TCHAR* Name) -> USphereComponent*
 	{

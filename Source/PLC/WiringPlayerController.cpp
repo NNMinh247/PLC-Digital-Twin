@@ -12,6 +12,7 @@
 
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"          // GEngine->AddOnScreenDebugMessage (debug)
 #include "Components/PrimitiveComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Blueprint/UserWidget.h"
@@ -73,14 +74,26 @@ void AWiringPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
 
-	if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent))
+	// Ưu tiên Enhanced Input nếu đã có asset IA_Grab (/Game/Inputs/IA_Grab).
+	if (GrabAction)
 	{
-		if (GrabAction)
+		if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent))
 		{
 			// Click-click: chỉ cần sự kiện nhấn (Started) cho cả bắt đầu và hoàn tất dây.
 			EIC->BindAction(GrabAction, ETriggerEvent::Started, this, &AWiringPlayerController::OnClick);
 		}
 	}
+	else if (InputComponent)
+	{
+		// Fallback thuần C++: chưa migrate IA_Grab/IMC_Wiring -> bind thẳng chuột trái.
+		// Nhờ vậy nối dây chạy được ngay cả khi thiếu asset Enhanced Input.
+		InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AWiringPlayerController::OnClick);
+	}
+
+	// DEBUG: xác nhận đã bind theo đường nào (xem trong Output Log lúc Play).
+	UE_LOG(LogTemp, Warning, TEXT("[WIRING] SetupInputComponent: GrabAction=%d InputComponent=%d -> bind '%s'"),
+		GrabAction != nullptr, InputComponent != nullptr,
+		GrabAction ? TEXT("EnhancedInput(IA_Grab)") : TEXT("Fallback LMB"));
 }
 
 void AWiringPlayerController::PlayerTick(float DeltaTime)
@@ -155,18 +168,22 @@ bool AWiringPlayerController::GetDragWorldPoint(FVector& OutPoint, ATerminal*& O
 		}
 	}
 
-	// 2) Trúng hình học thế giới -> bám mặt phẳng đó.
-	if (TraceCursor(ECC_Visibility, true, PendingWire, Hit))
-	{
-		OutPoint = Hit.ImpactPoint;
-		return true;
-	}
-
-	// 3) Không trúng gì -> đặt cách nguồn một đoạn theo tia con trỏ.
+	// 2) Không hover cọc -> chiếu con trỏ lên MẶT PHẲNG bàn (đi qua đầu A, đối diện camera).
+	//    Giữ đầu tự do trượt đúng độ sâu của bàn -> preview mượt, không giật theo hình học lồi lõm.
 	FVector Origin, Dir;
 	if (GetCursorRay(Origin, Dir))
 	{
-		OutPoint = Origin + Dir * 200.0f;
+		const ATerminal* StartT = PendingWire ? PendingWire->GetTerminal(EWireEnd::A) : nullptr;
+		const FVector PlanePoint = StartT ? StartT->GetSnapLocation() : (Origin + Dir * 200.0f);
+		const FVector PlaneNormal = (Origin - PlanePoint).GetSafeNormal(); // mặt phẳng hướng về camera
+		if (!PlaneNormal.IsNearlyZero())
+		{
+			OutPoint = FMath::RayPlaneIntersection(Origin, Dir, FPlane(PlanePoint, PlaneNormal));
+		}
+		else
+		{
+			OutPoint = Origin + Dir * 200.0f;
+		}
 		return true;
 	}
 	return false;
@@ -174,6 +191,19 @@ bool AWiringPlayerController::GetDragWorldPoint(FVector& OutPoint, ATerminal*& O
 
 void AWiringPlayerController::OnClick()
 {
+	// ===== DEBUG 1: click có TỚI controller không + con trỏ có trong ô board không =====
+	{
+		const bool bOverBoard = Hmi ? Hmi->IsCursorOverBoard() : false;
+		UE_LOG(LogTemp, Warning, TEXT("[WIRING] OnClick fired. Hmi=%d OverBoard=%d bPlacing=%d"),
+			Hmi != nullptr, bOverBoard, bPlacing);
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan,
+				FString::Printf(TEXT("[WIRING] Click! Hmi=%d OverBoard=%d Placing=%d"),
+					Hmi != nullptr, bOverBoard, bPlacing));
+		}
+	}
+
 	// Alt + click -> xoá dây (không tạo/nối dây).
 	if (IsInputKeyDown(EKeys::LeftAlt) || IsInputKeyDown(EKeys::RightAlt))
 	{
@@ -184,6 +214,15 @@ void AWiringPlayerController::OnClick()
 	FHitResult Hit;
 	const bool bHit = TraceCursor(WIRING_TRACE_CHANNEL, false, PendingWire, Hit);
 	ATerminal* HitTerm = bHit ? Cast<ATerminal>(Hit.GetActor()) : nullptr;
+
+	// ===== DEBUG 2: tia trace có TRÚNG cọc không =====
+	UE_LOG(LogTemp, Warning, TEXT("[WIRING]   trace bHit=%d actor='%s' isTerminal=%d"),
+		bHit, *GetNameSafe(Hit.GetActor()), HitTerm != nullptr);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.f, HitTerm ? FColor::Green : FColor::Red,
+			FString::Printf(TEXT("[WIRING] trace=%s"), bHit ? *GetNameSafe(Hit.GetActor()) : TEXT("MISS")));
+	}
 
 	if (!bPlacing)
 	{
