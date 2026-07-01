@@ -1,5 +1,6 @@
 // Terminal.cpp
 #include "Terminal.h"
+#include "Wire.h"
 #include "WiringInteraction.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
@@ -42,4 +43,52 @@ ATerminal::ATerminal()
 FVector ATerminal::GetSnapLocation() const
 {
 	return SnapPoint ? SnapPoint->GetComponentLocation() : GetActorLocation();
+}
+
+int32 ATerminal::AttachWire(AWire* Wire)
+{
+	if (!Wire)
+	{
+		return 0;
+	}
+	int32 Idx = WireStack.IndexOfByKey(Wire);
+	if (Idx == INDEX_NONE)
+	{
+		Idx = WireStack.Add(Wire);
+	}
+	bIsOccupied = WireStack.Num() > 0;
+	return Idx;
+}
+
+void ATerminal::DetachWire(AWire* Wire)
+{
+	if (WireStack.Remove(Wire) > 0)
+	{
+		bIsOccupied = WireStack.Num() > 0;
+		// Các dây còn lại tụt tầng -> cập nhật lại vị trí đầu dây.
+		for (AWire* Other : WireStack)
+		{
+			if (Other)
+			{
+				Other->RefreshGeometry();
+			}
+		}
+	}
+}
+
+int32 ATerminal::GetLayer(const AWire* Wire) const
+{
+	const int32 Idx = WireStack.IndexOfByKey(Wire);
+	return Idx == INDEX_NONE ? 0 : Idx;
+}
+
+FVector ATerminal::GetPlugLocation(int32 Layer) const
+{
+	const FVector Base = GetSnapLocation();
+	FVector Dir = GetActorTransform().TransformVectorNoScale(StackAxisLocal).GetSafeNormal();
+	if (Dir.IsNearlyZero())
+	{
+		Dir = FVector::UpVector;
+	}
+	return Base + Dir * (BaseLift + LayerStep * (float)Layer);
 }

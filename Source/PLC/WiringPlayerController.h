@@ -14,6 +14,7 @@ class UHmiWidget;
 class AWire;
 class ATerminal;
 enum class EWireEnd : uint8;
+struct FHitResult;
 
 /**
  * Điều khiển thao tác đấu dây bằng chuột (Enhanced Input).
@@ -69,11 +70,19 @@ protected:
 	// Một cú click chuột (IA_Grab Started). Xử lý cả bắt đầu lẫn hoàn tất dây (và Alt = xoá).
 	void OnClick();
 
-	// Alt + click: xoá dây dưới con trỏ.
-	void DeleteWireUnderCursor();
+	// Alt + click: trúng THÂN dây -> xoá cả dây; trúng NODE -> tháo đầu dây trên cùng ở node đó
+	// rồi kéo đầu vừa tháo theo chuột để nối chỗ khác.
+	void HandleAltClick();
 
-	// Tìm 1 dây đang nối vào cọc T (dùng khi Alt+click trúng cọc thay vì trúng đầu dây). Null nếu không có.
-	AWire* FindWireOnTerminal(const ATerminal* T) const;
+	// Multi-trace theo tia con trỏ (near->far). Trả false nếu không có tia.
+	bool MultiTraceCursor(TArray<FHitResult>& OutHits, AActor* IgnoreActor) const;
+
+	// Cọc gần nhất dưới con trỏ (bỏ qua thân dây). Dùng cho click bắt đầu/hoàn tất + preview.
+	bool FindTerminalUnderCursor(ATerminal*& OutTerm, AActor* IgnoreActor) const;
+
+	// Suy ra cọc từ 1 hit: trúng cọc -> chính nó; trúng đầu dây đã cắm -> cọc mà đầu dây đó đang cắm.
+	// Nhờ vậy click lên một tầng dây trên cọc = click chính cọc đó (để cắm thêm tầng).
+	ATerminal* ResolveTerminalFromHit(const FHitResult& Hit) const;
 
 	// Tia dưới con trỏ: ưu tiên ô board (chiếu ngược qua camera) -> deproject viewport chính.
 	bool GetCursorRay(FVector& OutOrigin, FVector& OutDir) const;
@@ -87,11 +96,24 @@ protected:
 	// Điểm thế giới cho đầu dây đang đặt: ưu tiên dính cọc -> world geometry -> theo tia.
 	bool GetDragWorldPoint(FVector& OutPoint, ATerminal*& OutHoverTerminal) const;
 
-	// Dây đang đặt (đã ghim đầu A, đang chờ click 2 để nối đầu B). Null nếu không đặt.
+	// Dây đang đặt (một đầu đã ghim vào cọc, đầu kia đang bám chuột chờ click nối). Null nếu không đặt.
 	UPROPERTY()
 	AWire* PendingWire = nullptr;
 
 	bool bPlacing = false;
+
+	// Đầu ĐANG KÉO của dây đang đặt (đầu tự do bám chuột). Mặc định B khi bắt đầu dây mới;
+	// khi Alt tháo đầu ở node thì có thể là A hoặc B.
+	EWireEnd PlacingEnd;
+
+	// Cọc mà đầu đang kéo vừa được tháo ra (chỉ khi Alt-tháo dây có sẵn). Click huỷ -> gắn lại về đây.
+	// Null nghĩa là dây vừa spawn mới -> huỷ thì xoá hẳn.
+	UPROPERTY()
+	ATerminal* PlacingOriginTerminal = nullptr;
+
+	// Dò cạnh nhấn chuột trái trong PlayerTick (fallback khi chưa có IA_Grab — BindKey không
+	// kích hoạt ổn trong input mode GameAndUI). Chỉ dùng khi GrabAction == null.
+	bool bLmbWasDown = false;
 
 	// Tạo + add HUD vào viewport (gọi sau BeginPlay 1 nhịp để các capture actor kịp khởi tạo).
 	void CreateHud();
