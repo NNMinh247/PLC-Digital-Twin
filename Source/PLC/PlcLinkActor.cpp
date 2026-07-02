@@ -9,6 +9,9 @@
 #include "GameFramework/PlayerController.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Engine.h"                     // GEngine->AddOnScreenDebugMessage
+#include "Misc/CommandLine.h"                  // FCommandLine::Get
+#include "Misc/Parse.h"                        // FParse::Value
+#include "TimerManager.h"                      // FTimerManager (reconnect)
 
 APlcLinkActor::APlcLinkActor()
 {
@@ -39,10 +42,42 @@ void APlcLinkActor::BeginPlay()
     // 2) Bind phím số 1..8 để toggle đèn 0..7
     BindToggleKeys();
 
-    // 3) Kết nối WebSocket tới Bridge C#
+    // 3) Xác định địa chỉ Bridge (cho phép override qua dòng lệnh).
+    //      -PlcBridgeUrl=ws://host:port   (ghi đè toàn bộ)
+    //      -PlcBridgePort=9090            (chỉ đổi port, giữ 127.0.0.1)
+    {
+        FString UrlOverride;
+        int32   PortOverride = 0;
+        if (FParse::Value(FCommandLine::Get(), TEXT("PlcBridgeUrl="), UrlOverride) && !UrlOverride.IsEmpty())
+        {
+            ServerUrl = UrlOverride;
+        }
+        else if (FParse::Value(FCommandLine::Get(), TEXT("PlcBridgePort="), PortOverride) && PortOverride > 0)
+        {
+            ServerUrl = FString::Printf(TEXT("ws://127.0.0.1:%d"), PortOverride);
+        }
+        UE_LOG(LogTemp, Warning, TEXT("[PLC] Bridge URL = %s"), *ServerUrl);
+    }
+
+    // 4) Kết nối WebSocket tới Bridge C# (tự nối lại nếu rớt).
     if (!FModuleManager::Get().IsModuleLoaded("WebSockets"))
     {
         FModuleManager::Get().LoadModule("WebSockets");
+    }
+
+    bShuttingDown = false;
+    ConnectToBridge();
+}
+
+void APlcLinkActor::ConnectToBridge()
+{
+    if (bShuttingDown)
+    {
+        return;
+    }
+    if (WebSocket.IsValid() && WebSocket->IsConnected())
+    {
+        return; // đã nối rồi, khỏi tạo lại
     }
 
     WebSocket = FWebSocketsModule::Get().CreateWebSocket(ServerUrl);
@@ -52,14 +87,16 @@ void APlcLinkActor::BeginPlay()
             UE_LOG(LogTemp, Warning, TEXT("[PLC] Da ket noi toi bridge: %s"), *ServerUrl);
         });
 
-    WebSocket->OnConnectionError().AddLambda([](const FString& Error)
+    WebSocket->OnConnectionError().AddLambda([this](const FString& Error)
         {
-            UE_LOG(LogTemp, Error, TEXT("[PLC] Loi ket noi: %s"), *Error);
+            UE_LOG(LogTemp, Error, TEXT("[PLC] Loi ket noi: %s  -> thu lai sau %.0fs"), *Error, ReconnectIntervalSec);
+            ScheduleReconnect();
         });
 
-    WebSocket->OnClosed().AddLambda([](int32 Code, const FString& Reason, bool bWasClean)
+    WebSocket->OnClosed().AddLambda([this](int32 Code, const FString& Reason, bool bWasClean)
         {
-            UE_LOG(LogTemp, Warning, TEXT("[PLC] Dong ket noi (%d): %s"), Code, *Reason);
+            UE_LOG(LogTemp, Warning, TEXT("[PLC] Dong ket noi (%d): %s  -> thu lai sau %.0fs"), Code, *Reason, ReconnectIntervalSec);
+            ScheduleReconnect();
         });
 
     WebSocket->OnMessage().AddLambda([this](const FString& Message)
@@ -68,6 +105,29 @@ void APlcLinkActor::BeginPlay()
         });
 
     WebSocket->Connect();
+}
+
+void APlcLinkActor::ScheduleReconnect()
+{
+    if (bShuttingDown)
+    {
+        return;
+    }
+    UWorld* W = GetWorld();
+    if (!W)
+    {
+        return;
+    }
+    // Đã có timer đang chờ -> không đặt thêm (tránh nối lại dồn dập).
+    if (W->GetTimerManager().IsTimerActive(ReconnectTimer))
+    {
+        return;
+    }
+    W->GetTimerManager().SetTimer(
+        ReconnectTimer,
+        FTimerDelegate::CreateUObject(this, &APlcLinkActor::ConnectToBridge),
+        FMath::Max(0.5f, ReconnectIntervalSec),
+        false);
 }
 
 // Bridge gửi (mỗi ~100ms), 1 trong các trường:
@@ -275,6 +335,11 @@ void APlcLinkActor::ShowScreenLog(const FString& Text, const FColor& Color, int3
 
 void APlcLinkActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    bShuttingDown = true; // chặn mọi lần thử nối lại
+    if (UWorld* W = GetWorld())
+    {
+        W->GetTimerManager().ClearTimer(ReconnectTimer);
+    }
     if (WebSocket.IsValid() && WebSocket->IsConnected())
     {
         WebSocket->Close();

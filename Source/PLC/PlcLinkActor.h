@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "IWebSocket.h"
+#include "Engine/TimerHandle.h"
 #include "PlcLinkActor.generated.h"
 
 class FJsonObject;
@@ -37,6 +38,9 @@ public:
     int32 NumChannels = 8;
 
     // Địa chỉ Bridge. Dùng IP máy chạy Bridge nếu khác máy.
+    // Có thể override lúc chạy bằng dòng lệnh:
+    //   -PlcBridgeUrl=ws://host:port   (ghi đè toàn bộ)
+    //   -PlcBridgePort=9090            (chỉ đổi port, giữ 127.0.0.1)
     UPROPERTY(EditAnywhere, Category = "PLC")
     FString ServerUrl = TEXT("ws://127.0.0.1:8080");
 
@@ -74,6 +78,11 @@ private:
     void ApplyLight(int32 Index, bool bOn);
     void BindToggleKeys();
 
+    // Tạo socket + gắn handler + Connect(). Gọi lại được nhiều lần (dùng cho reconnect).
+    void ConnectToBridge();
+    // Hẹn giờ thử kết nối lại (chống đặt trùng nhiều timer).
+    void ScheduleReconnect();
+
     // Phím 1..8: giả lập -> đảo đèn tại chỗ; thường -> gửi toggle xuống PLC.
     void HandleNumberKey(int32 Index);
     // Phím S: bật/tắt chế độ giả lập (kèm log trên màn hình).
@@ -88,6 +97,12 @@ private:
     class USceneComponent* SceneRoot;
 
     TSharedPtr<IWebSocket> WebSocket;
+
+    // Reconnect — tất cả là member THƯỜNG (không UPROPERTY) để KHÔNG đổi schema
+    // serialize của actor (nếu để UPROPERTY sẽ lệch với bản cook cũ -> crash lúc load).
+    float ReconnectIntervalSec = 3.0f;   // giây
+    FTimerHandle ReconnectTimer;
+    bool bShuttingDown = false;   // true khi EndPlay -> không thử nối lại nữa
 
     // Trạng thái gần nhất (để chỉ bắn event khi đổi)
     TArray<bool> LastX;            // công tắc
